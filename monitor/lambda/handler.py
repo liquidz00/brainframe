@@ -18,6 +18,8 @@ USER_AGENT = "brainframe-monitor/1.0 (+https://github.com/liquidz00/Patcher)"
 TARGETS = json.loads(os.environ["TARGETS"])
 TABLE_NAME = os.environ["DDB_TABLE"]
 WEBHOOK_PARAM = os.environ["SLACK_WEBHOOK_PARAM"]
+STATS_URL = os.environ.get("STATS_URL", "")  # empty disables the freshness check
+FRESH_MAX_AGE_HOURS = float(os.environ.get("FRESH_MAX_AGE_HOURS", "26"))
 
 _table = boto3.resource("dynamodb").Table(TABLE_NAME)
 _ssm = boto3.client("ssm")
@@ -54,6 +56,24 @@ def _probe(target):
     return "up", f"HTTP {code}"
 
 
+def _probe_freshness():
+    """Return ``("up" | "down", reason)`` from the catalog's last-refresh age."""
+    req = urllib.request.Request(STATS_URL, headers={"User-Agent": USER_AGENT})
+    try:
+        with _opener.open(req, timeout=PROBE_TIMEOUT) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:
+        return "down", f"stats fetch failed: {exc}"
+
+    stamp = data.get("last_refresh")
+    if not stamp:
+        return "down", "catalog reports no last_refresh"
+    age_hours = (datetime.now(timezone.utc) - datetime.fromisoformat(stamp)).total_seconds() / 3600
+    if age_hours > FRESH_MAX_AGE_HOURS:
+        return "down", f"catalog stale: refreshed {age_hours:.0f}h ago"
+    return "up", f"fresh ({age_hours:.0f}h ago)"
+
+
 def _last_status(name):
     item = _table.get_item(Key={"target": name}).get("Item")
     return item["status"] if item else "up"  # assume healthy until proven otherwise
@@ -86,10 +106,12 @@ def _post_slack(text):
 
 
 def handler(event, context):
+    results = [(target["name"], *_probe(target)) for target in TARGETS]
+    if STATS_URL:
+        results.append(("catalog freshness", *_probe_freshness()))
+
     transitions = []
-    for target in TARGETS:
-        name = target["name"]
-        status, reason = _probe(target)
+    for name, status, reason in results:
         if status != _last_status(name):
             transitions.append((name, status, reason))
             _save_status(name, status, reason)
@@ -101,4 +123,4 @@ def handler(event, context):
         ]
         _post_slack("\n".join(lines))
 
-    return {"checked": len(TARGETS), "transitions": len(transitions)}
+    return {"checked": len(results), "transitions": len(transitions)}

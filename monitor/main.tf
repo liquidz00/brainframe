@@ -98,6 +98,8 @@ resource "aws_lambda_function" "monitor" {
       TARGETS             = jsonencode(var.targets)
       DDB_TABLE           = aws_dynamodb_table.status.name
       SLACK_WEBHOOK_PARAM = local.slack_webhook_name
+      STATS_URL           = var.stats_url
+      FRESH_MAX_AGE_HOURS = tostring(var.freshness_max_age_hours)
     }
   }
 
