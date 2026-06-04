@@ -1,12 +1,16 @@
 # brainframe
 
-A personal AWS + Terraform playground. Each subfolder is an independent project with its own Terraform state.
+A personal AWS + Terraform playground. Each subfolder is an independent project with its own remote Terraform state.
 
 ## Projects
 
+### `bootstrap/`
+
+Creates the shared S3 bucket that holds remote Terraform state for the other projects (versioned, encrypted, public access blocked). It keeps its *own* state local, since the backend bucket can't store the state of its own creation. Run this once before any other project.
+
 ### `monitor/`
 
-A serverless uptime monitor for [Patcher](https://github.com/liquidz00/Patcher). An EventBridge schedule invokes a Python Lambda every 15 minutes; the Lambda probes the public endpoints (`api`, `mcp`), records last-known status per target in DynamoDB, and posts to Slack only on a transition (one alert when something goes down, one when it recovers). It runs off-site, so it survives both a Linode outage and a home-internet outage.
+A serverless uptime monitor for [Patcher](https://github.com/liquidz00/Patcher). An EventBridge schedule invokes a Python Lambda every 15 minutes; the Lambda probes the public endpoints (`api`, `mcp`) plus catalog freshness (via `/stats`), records last-known status per check in DynamoDB, and posts to Slack only on a transition (one alert when something goes down, one when it recovers). It runs off-site, so it survives both a Linode outage and a home-internet outage.
 
 Stack: Lambda, EventBridge, DynamoDB, SSM Parameter Store, IAM, all in Terraform.
 
@@ -15,6 +19,25 @@ Stack: Lambda, EventBridge, DynamoDB, SSM Parameter Store, IAM, all in Terraform
 - Terraform >= 1.9
 - AWS CLI v2 with an SSO profile named `patcher` (override via `-var aws_profile=...`)
 - A Slack incoming webhook URL
+
+## Remote state (run once)
+
+```bash
+cd bootstrap
+aws sso login --profile patcher
+terraform init
+terraform apply                      # creates the state bucket
+terraform output state_bucket        # copy this name
+```
+
+Paste that bucket name into `monitor/backend.tf` (the `bucket =` line), then migrate the monitor's existing local state into S3:
+
+```bash
+cd ../monitor
+terraform init -migrate-state        # answer "yes" to copy state to S3
+```
+
+`monitor` now stores state in S3 with native locking (`use_lockfile`, no DynamoDB table). The old local `terraform.tfstate` becomes a backup you can delete.
 
 ## Deploy the monitor
 
