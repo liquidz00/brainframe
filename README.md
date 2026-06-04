@@ -6,7 +6,7 @@ A personal AWS + Terraform playground. Each subfolder is an independent project 
 
 ### `monitor/`
 
-A serverless uptime monitor for [Patcher](https://github.com/liquidz00/Patcher). An EventBridge schedule invokes a Python Lambda every 15 minutes; the Lambda probes the public endpoints (`api`, `mcp`, `docs`), records last-known status per target in DynamoDB, and posts to Slack only on a transition (one alert when something goes down, one when it recovers). It runs off-site, so it survives both a Linode outage and a home-internet outage.
+A serverless uptime monitor for [Patcher](https://github.com/liquidz00/Patcher). An EventBridge schedule invokes a Python Lambda every 15 minutes; the Lambda probes the public endpoints (`api`, `mcp`), records last-known status per target in DynamoDB, and posts to Slack only on a transition (one alert when something goes down, one when it recovers). It runs off-site, so it survives both a Linode outage and a home-internet outage.
 
 Stack: Lambda, EventBridge, DynamoDB, SSM Parameter Store, IAM, all in Terraform.
 
