@@ -81,7 +81,7 @@ resource "aws_lambda_function" "monitor" {
   runtime          = "python3.13"
   handler          = "handler.handler"
   filename         = data.archive_file.lambda.output_path
-  source_code_hash = data.archive_file.lambda.output_base64sha256
+  source_code_hash = filebase64sha256("${path.module}/lambda/handler.py")
   timeout          = 60
 
   environment {
