@@ -1,11 +1,10 @@
 provider "aws" {
-  region  = "us-east-1"
-  profile = "patcher"
+  region = var.aws_region
 
   default_tags {
     tags = {
       Project   = "brainframe"
-      Component = "bootstrap"
+      Component = "monitor"
       ManagedBy = "terraform"
     }
   }

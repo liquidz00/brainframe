@@ -6,15 +6,6 @@ data "aws_kms_alias" "ssm" {
   name = "alias/aws/ssm"
 }
 
-locals {
-  function_name = "brainframe-monitor"
-
-  # Created out-of-band so the webhook value never lands in Terraform state.
-  # Terraform only references its ARN to grant the Lambda read access.
-  slack_webhook_name = "/brainframe/monitor/slack_webhook"
-  slack_webhook_arn  = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${local.slack_webhook_name}"
-}
-
 # Zip the handler at plan time; source_code_hash triggers redeploys on change.
 data "archive_file" "lambda" {
   type        = "zip"

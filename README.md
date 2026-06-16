@@ -1,60 +1,55 @@
 # brainframe
 
-A personal AWS + Terraform playground. Each subfolder is an independent project with its own remote Terraform state.
+A personal AWS + Terraform playground. Each directory under `workspaces/` is an independent root configuration with its state in [HCP Terraform](https://app.terraform.io) (organization `liquidzoo`, project `brainframe`) — one HCP workspace per directory.
 
-## Projects
+## Layout
 
-### `bootstrap/`
+### `workspaces/brainframe/oidc/`
 
-Creates the shared S3 bucket that holds remote Terraform state for the other projects (versioned, encrypted, public access blocked). It keeps its *own* state local, since the backend bucket can't store the state of its own creation. Run this once before any other project.
+Bootstraps the AWS IAM OIDC trust that lets HCP run Terraform against AWS **without long-lived keys**: an OpenID Connect provider for `app.terraform.io` plus an IAM role (`brainframe-hcp-monitor`) whose trust policy is scoped to only the `monitor` workspace. It runs **locally** with an SSO profile, since it creates the very role that remote runs depend on (chicken-and-egg).
 
-### `monitor/`
+### `workspaces/brainframe/monitor/`
 
-A serverless uptime monitor for [Patcher](https://github.com/liquidz00/Patcher). An EventBridge schedule invokes a Python Lambda every 15 minutes; the Lambda probes the public endpoints (`api`, `mcp`) plus catalog freshness (via `/stats`), records last-known status per check in DynamoDB, and posts to Slack only on a transition (one alert when something goes down, one when it recovers). It runs off-site, so it survives both a Linode outage and a home-internet outage.
+A serverless uptime monitor for [Patcher](https://github.com/liquidz00/Patcher). An EventBridge schedule invokes a Python Lambda every 15 minutes; the Lambda probes the public endpoints (`api`, `mcp`) plus catalog freshness (via `/stats`), records last-known status per check in DynamoDB, and posts to Slack only on a transition (one alert when something goes down, one when it recovers). It runs off-site, so it survives both a Linode outage and a home-internet outage. Its plans and applies run **remotely on HCP**, authenticating to AWS via the OIDC role above.
 
-Stack: Lambda, EventBridge, DynamoDB, SSM Parameter Store, IAM, all in Terraform.
+Stack: Lambda, EventBridge, DynamoDB, SSM Parameter Store, IAM — all in Terraform.
 
 ## Prerequisites
 
-- Terraform >= 1.9
-- AWS CLI v2 with an SSO profile named `patcher` (override via `-var aws_profile=...`)
+- Terraform >= 1.9 and an HCP Terraform account (`terraform login`)
+- AWS CLI v2 with an SSO profile named `patcher` (used by the local `oidc` workspace and the one-time SSM step; override via `-var aws_profile=...`)
 - A Slack incoming webhook URL
 
-## Remote state (run once)
+## First-time setup
 
-```bash
-cd bootstrap
-aws sso login --profile patcher
-terraform init
-terraform apply                      # creates the state bucket
-terraform output state_bucket        # copy this name
-```
+1. **Create the OIDC trust (local, run once):**
 
-Paste that bucket name into `monitor/backend.tf` (the `bucket =` line), then migrate the monitor's existing local state into S3:
+   ```bash
+   cd workspaces/brainframe/oidc
+   aws sso login --profile patcher
+   terraform init
+   terraform apply
+   terraform output monitor_role_arn        # copy this
+   ```
 
-```bash
-cd ../monitor
-terraform init -migrate-state        # answer "yes" to copy state to S3
-```
+2. **Point `monitor` at the role.** In the HCP `monitor` workspace, add two **environment** variables — `TFC_AWS_PROVIDER_AUTH = true` and `TFC_AWS_RUN_ROLE_ARN = <the role ARN>` — and set Execution Mode to **Remote**. Remote runs now assume the role via OIDC; no static credentials anywhere.
 
-`monitor` now stores state in S3 with native locking (`use_lockfile`, no DynamoDB table). The old local `terraform.tfstate` becomes a backup you can delete.
+3. **Store the Slack webhook** as a SecureString (kept out of Terraform state):
+
+   ```bash
+   aws ssm put-parameter \
+     --name /brainframe/monitor/slack_webhook \
+     --type SecureString \
+     --value 'https://hooks.slack.com/services/XXX/YYY/ZZZ' \
+     --profile patcher --region us-east-1
+   ```
 
 ## Deploy the monitor
 
 ```bash
-cd monitor
-
-# 1. Store the Slack webhook as a SecureString (kept out of Terraform state).
-aws ssm put-parameter \
-  --name /brainframe/monitor/slack_webhook \
-  --type SecureString \
-  --value 'https://hooks.slack.com/services/XXX/YYY/ZZZ' \
-  --profile patcher --region us-east-1
-
-# 2. Refresh SSO creds, then apply.
-aws sso login --profile patcher
+cd workspaces/brainframe/monitor
 terraform init
-terraform plan
+terraform plan      # executes remotely on HCP via OIDC
 terraform apply
 ```
 
@@ -71,6 +66,7 @@ To prove the alert path, temporarily point a target's `body_match` at something 
 ## Tear down
 
 ```bash
+cd workspaces/brainframe/monitor
 terraform destroy        # removes everything except the SSM parameter
 aws ssm delete-parameter --name /brainframe/monitor/slack_webhook \
   --profile patcher --region us-east-1
@@ -78,4 +74,4 @@ aws ssm delete-parameter --name /brainframe/monitor/slack_webhook \
 
 ## Cost
 
-Everything sits inside the AWS free tier by a wide margin (~96 Lambda invocations/day, on-demand DynamoDB, one SSM parameter). Expected cost: $0.
+Everything sits inside the AWS free tier by a wide margin (~96 Lambda invocations/day, on-demand DynamoDB, one SSM parameter), and HCP Terraform remote runs are free-tier. Expected cost: **$0**.

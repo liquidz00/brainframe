@@ -5,7 +5,7 @@ provider "aws" {
   default_tags {
     tags = {
       Project   = "brainframe"
-      Component = "monitor"
+      Component = "oidc"
       ManagedBy = "terraform"
     }
   }

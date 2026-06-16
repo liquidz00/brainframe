@@ -4,12 +4,6 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-variable "aws_profile" {
-  description = "Local AWS CLI (SSO) profile Terraform authenticates with."
-  type        = string
-  default     = "patcher"
-}
-
 variable "schedule_expression" {
   description = "EventBridge rate/cron for the probe."
   type        = string
